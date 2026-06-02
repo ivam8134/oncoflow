@@ -26,6 +26,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { nameKey: t.nav.notes, href: "/notes", icon: FileText },
     { nameKey: t.nav.aiSummary, href: "/ai-summary", icon: BrainCircuit },
     { nameKey: t.nav.exports, href: "/exports", icon: Download },
+    { nameKey: "AI Predict", href: "/ai-predict", icon: BrainCircuit },
   ];
 
   return (

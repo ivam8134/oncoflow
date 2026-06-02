@@ -1,3 +1,4 @@
+import AIPrediction from "./pages/AIPrediction";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -46,9 +47,13 @@ function AppRoutes() {
       <Route path="/exports">
         <RequireAuth><AppLayout><Exports /></AppLayout></RequireAuth>
       </Route>
+      <Route path="/ai-predict">                                         
+        <RequireAuth><AppLayout><AIPrediction /></AppLayout></RequireAuth>
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );
+
 }
 
 function App() {

@@ -15,7 +15,7 @@
  *   { nameKey: "AI Predict", href: "/ai-predict", icon: BrainCircuit }
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -105,6 +105,56 @@ export default function AIPrediction() {
     lymph_nodes_positive: 0, er_status: 1, pr_status: 0, her2_status: 0,
     ki67_percent: 20, prior_chemo: 0, prior_radiation: 0,
   });
+  
+  useEffect(() => {
+  const patient = mockPatients.find(p => p.id === selectedPatient);
+  if (!patient) return;
+
+  // Parse stage from patient data
+  const stageMap: Record<string, number> = { "I": 1, "II": 2, "III": 3, "IV": 4 };
+  const stage = stageMap[patient.stage] || 2;
+
+  // Parse biomarkers into clinical flags
+  const bio = patient.biomarkers?.toLowerCase() || "";
+  const er  = bio.includes("er+") ? 1 : 0;
+  const pr  = bio.includes("pr+") ? 1 : 0;
+  const her2 = bio.includes("her2+") || bio.includes("her2 +") ? 1 : 0;
+
+  setClinical({
+    age:                  patient.age,
+    tumor_size_cm:        stage * 1.2,        // estimate from stage
+    stage:                stage,
+    lymph_nodes_positive: stage >= 3 ? 3 : 0, // estimate from stage
+    er_status:            er,
+    pr_status:            pr,
+    her2_status:          her2,
+    ki67_percent:         stage >= 3 ? 35 : 15,
+    prior_chemo:          0,
+    prior_radiation:      0,
+  });
+
+  // Parse genomic flags from biomarkers
+  setGenomic({
+    BRCA1:  bio.includes("brca1") ? 1 : 0,
+    BRCA2:  bio.includes("brca2") ? 1 : 0,
+    TP53:   bio.includes("tp53")  ? 1 : 0,
+    PIK3CA: bio.includes("pik3ca") ? 1 : 0,
+    PTEN:   bio.includes("pten")  ? 1 : 0,
+    ERBB2:  her2,
+    EGFR:   bio.includes("egfr")  ? 1 : 0,
+    KRAS:   bio.includes("kras")  ? 1 : 0,
+    BRAF:   bio.includes("braf")  ? 1 : 0,
+    ALK:    bio.includes("alk+")  ? 1 : 0,
+  });
+
+  // Auto-fill report from patient diagnosis
+  setReport(
+    `Patient: ${patient.name}, Age: ${patient.age}. ` +
+    `Diagnosis: ${patient.cancerType} Stage ${patient.stage}. ` +
+    `Biomarkers: ${patient.biomarkers}. ` +
+    `Assigned oncologist: ${patient.doctor}.`
+  );
+}, [selectedPatient]);
   const [result, setResult]     = useState<PredictResult | null>(null);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
