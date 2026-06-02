@@ -2,11 +2,9 @@ const router = require('express').Router();
 const multer = require('multer');
 const { auth } = require('../auth');
 const FormData = require('form-data');
-const fetch = require('node-fetch'); // npm install node-fetch@2
+const fetch = require('node-fetch');
 
 const WHISPER_URL = process.env.WHISPER_URL || 'http://localhost:9000';
-
-// Store audio in memory, not disk (we forward it directly)
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(auth);
@@ -22,6 +20,11 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
       filename: req.file.originalname || 'recording.webm',
       contentType: req.file.mimetype || 'audio/webm',
     });
+
+    // Forward optional language hint from the React client
+    if (req.body.language) {
+      form.append('language', req.body.language);
+    }
 
     const response = await fetch(`${WHISPER_URL}/transcribe`, {
       method: 'POST',

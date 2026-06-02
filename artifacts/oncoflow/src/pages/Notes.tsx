@@ -9,7 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Mic, ListPlus, Save, StopCircle, Loader2, AlertCircle } from "lucide-react";
+import {
+  Mic, ListPlus, Save, StopCircle, Loader2, AlertCircle, Globe,
+} from "lucide-react";
 import { mockPatients } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
 import { useLanguage } from "@/context/LanguageContext";
@@ -17,28 +19,55 @@ import { getToken } from "@/lib/api";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
+// Language options shown in the UI
+const LANG_OPTIONS = [
+  { value: "auto", label: "Auto-detect", flag: "🌐" },
+  { value: "en",   label: "English",     flag: "🇬🇧" },
+  { value: "fr",   label: "Français",    flag: "🇫🇷" },
+  { value: "ar",   label: "العربية",     flag: "🇩🇿" },
+];
+
+// Maps language code → human-readable label for display
+const LANG_LABEL: Record<string, string> = {
+  en: "English",
+  fr: "Français",
+  ar: "العربية",
+};
+
+// For Arabic we need RTL text direction in the transcript box
+const RTL_LANGS = new Set(["ar"]);
+
+interface TranscriptResult {
+  text: string;
+  language: string;
+  language_scores: Record<string, number>;
+}
+
 export default function Notes() {
   const { t } = useLanguage();
-  const [selectedPatient, setSelectedPatient] = useState(mockPatients[0].id);
-  const [noteContent, setNoteContent] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [transcript, setTranscript] = useState("");
-  const [recordingError, setRecordingError] = useState<string | null>(null);
+
+  const [selectedPatient, setSelectedPatient]   = useState(mockPatients[0].id);
+  const [noteContent, setNoteContent]           = useState("");
+  const [isRecording, setIsRecording]           = useState(false);
+  const [isTranscribing, setIsTranscribing]     = useState(false);
+  const [result, setResult]                     = useState<TranscriptResult | null>(null);
+  const [recordingError, setRecordingError]     = useState<string | null>(null);
+  const [selectedLang, setSelectedLang]         = useState("auto");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef   = useRef<Blob[]>([]);
+  const streamRef        = useRef<MediaStream | null>(null);
+
+  // ── Recording ──────────────────────────────────────────────────────────
 
   const startRecording = async () => {
     setRecordingError(null);
-    setTranscript("");
+    setResult(null);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Pick a MIME type the browser actually supports
       const mimeType = [
         "audio/webm;codecs=opus",
         "audio/webm",
@@ -46,7 +75,10 @@ export default function Notes() {
         "audio/mp4",
       ].find((m) => MediaRecorder.isTypeSupported(m)) || "";
 
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : {}
+      );
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
@@ -55,21 +87,19 @@ export default function Notes() {
       };
 
       recorder.onstop = async () => {
-        // Stop all tracks so the mic indicator disappears
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-
+        streamRef.current?.getTracks().forEach((tr) => tr.stop());
         const blob = new Blob(audioChunksRef.current, {
           type: mimeType || "audio/webm",
         });
-        await transcribeAudio(blob, mimeType);
+        await sendToWhisper(blob, mimeType);
       };
 
-      recorder.start(250); // collect data every 250 ms
+      recorder.start(250);
       setIsRecording(true);
     } catch (err: any) {
       setRecordingError(
         err.name === "NotAllowedError"
-          ? "Microphone access denied. Please allow microphone in browser settings."
+          ? "Microphone access denied. Please allow microphone access in your browser settings."
           : `Could not start recording: ${err.message}`
       );
     }
@@ -81,7 +111,12 @@ export default function Notes() {
     setIsTranscribing(true);
   };
 
-  const transcribeAudio = async (blob: Blob, mimeType: string) => {
+  const toggleRecording = () =>
+    isRecording ? stopRecording() : startRecording();
+
+  // ── Upload to Whisper ──────────────────────────────────────────────────
+
+  const sendToWhisper = async (blob: Blob, mimeType: string) => {
     const ext = mimeType.includes("ogg")
       ? ".ogg"
       : mimeType.includes("mp4")
@@ -90,6 +125,12 @@ export default function Notes() {
 
     const formData = new FormData();
     formData.append("audio", blob, `recording${ext}`);
+
+    // Send the language hint only when the user chose a specific language.
+    // "auto" means we omit the hint and let Whisper detect on its own.
+    if (selectedLang !== "auto") {
+      formData.append("language", selectedLang);
+    }
 
     try {
       const res = await fetch(`${API_BASE}/whisper/transcribe`, {
@@ -104,10 +145,14 @@ export default function Notes() {
       }
 
       const data = await res.json();
-      setTranscript(data.text || "");
+      setResult({
+        text: data.text,
+        language: data.language,
+        language_scores: data.language_scores ?? {},
+      });
       toast({
         title: t.notes.voiceProcessed,
-        description: t.notes.voiceProcessedDesc,
+        description: `${t.notes.voiceProcessedDesc} — ${LANG_LABEL[data.language] ?? data.language}`,
       });
     } catch (err: any) {
       setRecordingError(`Transcription error: ${err.message}`);
@@ -116,13 +161,7 @@ export default function Notes() {
     }
   };
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
-  };
+  // ── Manual note ────────────────────────────────────────────────────────
 
   const handleSaveNote = () => {
     if (!noteContent.trim()) return;
@@ -130,8 +169,13 @@ export default function Notes() {
     setNoteContent("");
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────
+
+  const isRTL = result ? RTL_LANGS.has(result.language) : false;
+
   return (
     <div className="space-y-6 pb-12 max-w-6xl mx-auto">
+      {/* Page header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
@@ -165,9 +209,11 @@ export default function Notes() {
           </TabsTrigger>
         </TabsList>
 
+        {/* ── Voice tab ── */}
         <TabsContent value="voice" className="mt-6 space-y-6">
           <Card className="shadow-sm border-blue-100 bg-blue-50/30">
-            <CardContent className="p-8 flex flex-col items-center justify-center text-center min-h-[300px]">
+            <CardContent className="p-8 flex flex-col items-center justify-center text-center min-h-[320px]">
+
               {/* Error banner */}
               {recordingError && (
                 <div className="flex items-start gap-2 p-3 mb-6 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 w-full max-w-md">
@@ -176,6 +222,28 @@ export default function Notes() {
                 </div>
               )}
 
+              {/* Language selector — shown only before / between recordings */}
+              {!isRecording && !isTranscribing && (
+                <div className="flex items-center gap-2 mb-6">
+                  <Globe className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground mr-1">Language:</span>
+                  {LANG_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setSelectedLang(opt.value)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                        selectedLang === opt.value
+                          ? "bg-primary text-white border-primary"
+                          : "bg-white text-gray-600 border-gray-200 hover:border-primary/50"
+                      }`}
+                    >
+                      {opt.flag} {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Record button */}
               <div className="mb-6 relative">
                 {isRecording && (
                   <span className="absolute -inset-4 rounded-full border-4 border-red-500/30 animate-ping" />
@@ -183,11 +251,12 @@ export default function Notes() {
                 <button
                   onClick={toggleRecording}
                   disabled={isTranscribing}
-                  className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isRecording
+                  className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all
+                    disabled:opacity-50 disabled:cursor-not-allowed
+                    ${isRecording
                       ? "bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30"
                       : "bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/30"
-                  }`}
+                    }`}
                 >
                   {isTranscribing ? (
                     <Loader2 className="w-10 h-10 animate-spin" />
@@ -199,6 +268,7 @@ export default function Notes() {
                 </button>
               </div>
 
+              {/* Status text */}
               <h3 className="text-xl font-semibold mb-2">
                 {isTranscribing
                   ? "Transcribing with Whisper…"
@@ -206,9 +276,9 @@ export default function Notes() {
                   ? t.notes.listening
                   : t.notes.tapToDictate}
               </h3>
-              <p className="text-muted-foreground max-w-md">
+              <p className="text-muted-foreground max-w-md text-sm">
                 {isTranscribing
-                  ? "Please wait while the audio is processed locally."
+                  ? "Processing your audio locally. This may take a few seconds."
                   : isRecording
                   ? t.notes.voiceHintListening
                   : t.notes.voiceHintIdle}
@@ -216,34 +286,86 @@ export default function Notes() {
             </CardContent>
           </Card>
 
-          {transcript && (
-            <Card className="shadow-sm border-green-100 bg-white">
+          {/* ── Transcript result card ── */}
+          {result && (
+            <Card className="shadow-sm bg-white">
               <CardHeader className="bg-gray-50/50 border-b border-gray-100 pb-3">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <ListPlus className="w-5 h-5 text-primary" />
-                  {t.notes.structuredOutput}
-                </CardTitle>
-                <CardDescription>{t.notes.aiExtracted}</CardDescription>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <ListPlus className="w-5 h-5 text-primary" />
+                    {t.notes.structuredOutput}
+                  </CardTitle>
+
+                  {/* Detected language badge + confidence bars */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Detected:</span>
+                    <Badge className="bg-primary/10 text-primary border-0 font-semibold">
+                      {LANG_OPTIONS.find((o) => o.value === result.language)?.flag}{" "}
+                      {LANG_LABEL[result.language] ?? result.language.toUpperCase()}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Confidence bars for each language */}
+                {Object.keys(result.language_scores).length > 0 && (
+                  <div className="mt-3 space-y-1.5">
+                    {Object.entries(result.language_scores)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([lang, score]) => (
+                        <div key={lang} className="flex items-center gap-2">
+                          <span className="text-xs w-20 text-muted-foreground shrink-0">
+                            {LANG_OPTIONS.find((o) => o.value === lang)?.flag}{" "}
+                            {LANG_LABEL[lang] ?? lang}
+                          </span>
+                          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                lang === result.language
+                                  ? "bg-primary"
+                                  : "bg-gray-300"
+                              }`}
+                              style={{ width: `${Math.round(score * 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground w-10 text-right shrink-0">
+                            {Math.round(score * 100)}%
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                <CardDescription className="mt-2">
+                  {t.notes.aiExtracted}
+                </CardDescription>
               </CardHeader>
+
               <CardContent className="pt-6">
-                <div className="bg-muted/30 p-4 rounded-lg border border-border mb-6">
-                  <p className="text-sm italic text-muted-foreground mb-2 font-medium">
+                {/* Transcript text — RTL for Arabic */}
+                <div
+                  className="bg-muted/30 p-4 rounded-lg border border-border mb-6"
+                  dir={isRTL ? "rtl" : "ltr"}
+                >
+                  <p className="text-sm italic text-muted-foreground mb-2 font-medium"
+                     dir="ltr">
                     {t.notes.transcript}
                   </p>
-                  <p className="text-foreground">{transcript}</p>
+                  <p className={`text-foreground leading-relaxed ${isRTL ? "font-medium" : ""}`}>
+                    {result.text}
+                  </p>
                 </div>
 
                 <div className="flex justify-end gap-2">
                   <Button
                     variant="outline"
-                    onClick={() => setNoteContent(transcript)}
+                    onClick={() => setNoteContent(result.text)}
                   >
                     {t.notes.editText}
                   </Button>
                   <Button
                     onClick={() => {
                       toast({ title: t.notes.saved });
-                      setTranscript("");
+                      setResult(null);
                     }}
                   >
                     {t.notes.saveToRecord}
@@ -254,6 +376,7 @@ export default function Notes() {
           )}
         </TabsContent>
 
+        {/* ── Manual entry tab ── */}
         <TabsContent value="text" className="mt-6 space-y-6">
           <Card className="shadow-sm">
             <CardHeader className="bg-gray-50/50 border-b border-gray-100">
@@ -289,7 +412,7 @@ export default function Notes() {
         </TabsContent>
       </Tabs>
 
-      {/* Recent notes - unchanged */}
+      {/* Recent notes */}
       <div className="mt-8">
         <h3 className="text-lg font-semibold mb-4 text-foreground">
           {t.notes.recentNotes}
@@ -298,7 +421,7 @@ export default function Notes() {
           <Card className="shadow-sm bg-white">
             <CardContent className="p-4">
               <div className="flex justify-between items-start mb-2">
-                <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 font-medium">
+                <Badge className="bg-blue-100 text-blue-800 font-medium">
                   {t.notes.response}
                 </Badge>
                 <span className="text-xs text-muted-foreground">Mar 15, 2024</span>

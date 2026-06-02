@@ -57,20 +57,23 @@ Important:
 
 // ─── API call ─────────────────────────────────────────────────────────────────
 
-async function callClaude(messages: { role: string; content: string }[], system: string): Promise<string> {
-  const response = await fetch('http://localhost:4000/api/chat-ai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, system }),
-  });
-
-  if (!response.ok) throw new Error(`API error: ${response.status}`);
-
+async function callClaude(messages) {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=YOUR_GEMINI_API_KEY`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: messages.map(m => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        }))
+      })
+    }
+  );
   const data = await response.json();
-  return data.content
-    .filter((block: { type: string }) => block.type === 'text')
-    .map((block: { type: string; text: string }) => block.text)
-    .join('');
+  return data.candidates[0].content.parts[0].text;
 }
 
 
