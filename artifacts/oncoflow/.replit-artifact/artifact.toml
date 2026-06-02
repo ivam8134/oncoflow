@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/oncoflow/"
+title = "OncoFlow"
+version = "1.0.0"
+id = "artifacts/oncoflow"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/oncoflow/" ]
+localPort = 22221
+
+[services.development]
+run = "pnpm --filter @workspace/oncoflow run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/oncoflow", "run", "build" ]
+publicDir = "artifacts/oncoflow/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22221"
+BASE_PATH = "/oncoflow/"
