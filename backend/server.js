@@ -32,6 +32,7 @@ app.use('/api/ai',           require('./routes/ai'));
 app.use('/api/chat',         require('./routes/chat'));
 app.use('/api/translations', require('./routes/translations'));
 app.use('/api/chat-ai',      require('./routes/chat-ai'));
+app.use('/api/whisper', require('./routes/whisper'));
 
 // ─── Health check ──────────────────────────────────────────────────────────
 app.get('/', (_, res) => res.json({ ok: true, service: 'OncoFlow API', version: '1.0.0' }));
